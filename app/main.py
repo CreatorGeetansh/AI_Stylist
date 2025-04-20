@@ -10,10 +10,9 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 import requests
-import torch
-from transformers import AutoModelForCausalLM, AutoProcessor
 from dotenv import load_dotenv
 import google.generativeai as genai # Import Gemini library
+import google.api_core.exceptions # Import Gemini exceptions
 
 # --- Configuration & Setup ---
 load_dotenv() # Load environment variables from .env file
@@ -27,83 +26,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Model Configuration ---
-# Florence-2
-MODEL_ID = os.getenv("MODEL_ID", "microsoft/florence-2-base")
-PROCESSOR_ID = os.getenv("PROCESSOR_ID", "microsoft/florence-2-large") # Keeping large processor as per original
-DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-DTYPE = torch.float16 if torch.cuda.is_available() and DEVICE != "mps" else torch.float32 # MPS doesn't fully support float16 well with all ops
-
-# Gemini
+# Gemini Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = "gemini-2.0-flash" # Use "gemini-1.5-flash" or "gemini-1.5-pro" if available/preferred
+# Use a model that supports vision input (gemini-pro-vision is deprecated, use 1.5 flash or pro)
+# gemini-1.5-flash is generally faster and cheaper
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-1.5-flash")
 
 if not GEMINI_API_KEY:
-    logger.warning("GEMINI_API_KEY not found in environment variables. AI recommendations will be disabled.")
-    # raise ValueError("GEMINI_API_KEY environment variable not set.") # Alternatively, make it mandatory
+    logger.error("FATAL: GEMINI_API_KEY not found in environment variables. Application cannot start.")
+    # You might want the app to fail hard if the core functionality relies entirely on Gemini
+    raise ValueError("GEMINI_API_KEY environment variable not set.")
 
 # Application State
 app_state = {
-    "florence_model": None,
-    "florence_processor": None,
     "gemini_model": None,
     "is_ready": False,
-    "gemini_available": False,
 }
 
-# --- Model Loading & Pre-heating ---
-
-def load_florence_model():
-    """Loads the Florence-2 model and processor."""
-    logger.info(f"Starting Florence-2 model loading: Model={MODEL_ID}, Processor={PROCESSOR_ID} on {DEVICE} ({DTYPE})")
-    if MODEL_ID != PROCESSOR_ID:
-        logger.warning(f"Using mismatched Florence model ({MODEL_ID}) and processor ({PROCESSOR_ID}). Recommended to use matching versions.")
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID,
-            torch_dtype=DTYPE,
-            trust_remote_code=True
-        ).to(DEVICE).eval()
-        processor = AutoProcessor.from_pretrained(
-            PROCESSOR_ID,
-            trust_remote_code=True
-        )
-        logger.info("Florence-2 model and processor loaded successfully.")
-        return model, processor
-    except Exception as e:
-        logger.error(f"Error loading Florence-2 model/processor: {e}", exc_info=True)
-        raise RuntimeError(f"Failed to load Florence-2 model '{MODEL_ID}' or processor '{PROCESSOR_ID}'.") from e
-
-def preheat_florence_model(model, processor):
-    """Runs a dummy inference to pre-heat the Florence-2 model."""
-    logger.info("Starting Florence-2 model pre-heating...")
-    try:
-        dummy_image = Image.new('RGB', (64, 64), color = 'black')
-        task_prompt = "<CAPTION>" # Basic caption for preheating
-        inputs = processor(text=task_prompt, images=dummy_image, return_tensors="pt").to(DEVICE, DTYPE)
-        with torch.no_grad(): # Ensure no gradients are computed
-            generated_ids = model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=50,
-                num_beams=3,
-                do_sample=False # More deterministic for preheating
-            )
-        processor.batch_decode(generated_ids, skip_special_tokens=False)
-        logger.info("Florence-2 model pre-heating completed.")
-    except Exception as e:
-        logger.error(f"Error during Florence-2 pre-heating: {e}", exc_info=True)
-        # Don't raise here, allow app to start but log the error
+# --- Model Configuration & Lifespan ---
 
 def configure_gemini():
     """Configures and returns the Gemini client."""
     if not GEMINI_API_KEY:
-        logger.warning("Gemini API Key not configured. Skipping Gemini model setup.")
+         # This case is already handled by the check above, but adding redundancy
+        logger.error("Attempted to configure Gemini without an API key.")
         return None
     try:
         logger.info(f"Configuring Gemini client for model: {GEMINI_MODEL_NAME}")
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        # Optional: Add a simple test call here if needed
+        # Safety settings - adjust as needed (example: block fewer things)
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        ]
+        model = genai.GenerativeModel(
+            GEMINI_MODEL_NAME,
+            safety_settings=safety_settings # Apply safety settings here
+        )
+        # Optional: Add a simple test call here to verify API key and model access
         # model.generate_content("Test connection.")
         logger.info("Gemini client configured successfully.")
         return model
@@ -111,69 +73,51 @@ def configure_gemini():
         logger.error(f"Error configuring Gemini client: {e}", exc_info=True)
         return None # Allow app to run without Gemini if configuration fails
 
-
-# --- FastAPI Lifespan Management (Startup/Shutdown) ---
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
-    model_loaded = False
-    try:
-        app_state["florence_model"], app_state["florence_processor"] = load_florence_model()
-        preheat_florence_model(app_state["florence_model"], app_state["florence_processor"])
-        model_loaded = True
-    except Exception as e:
-        logger.error(f"Florence-2 initialization failed: {e}", exc_info=True)
-        # Allow startup without Florence-2 if needed, but log critical failure
-        # Or raise the exception if Florence-2 is essential
-
+    gemini_configured = False
     try:
         app_state["gemini_model"] = configure_gemini()
         if app_state["gemini_model"]:
-            app_state["gemini_available"] = True
-            logger.info("Gemini integration is active.")
+            gemini_configured = True
+            app_state["is_ready"] = True
+            logger.info("Gemini integration is active. Application is ready.")
         else:
-             logger.warning("Gemini integration is inactive due to missing key or configuration error.")
+             logger.error("Gemini configuration failed. Application may not function correctly.")
+             app_state["is_ready"] = False # Explicitly set to false
+
     except Exception as e:
-        logger.error(f"Gemini initialization failed: {e}", exc_info=True)
-        # Allow startup without Gemini
+        logger.error(f"Critical error during Gemini initialization: {e}", exc_info=True)
+        app_state["is_ready"] = False # Ensure readiness is false on unexpected error
 
-
-    if model_loaded: # Only set ready if the core model (Florence) loaded
-        app_state["is_ready"] = True
-        logger.info("Application is ready (Florence-2 loaded).")
-    else:
-         logger.error("Application startup failed: Core model (Florence-2) did not load.")
+    if not gemini_configured:
+        logger.critical("Application startup failed: Core model (Gemini) could not be configured.")
+        # Depending on requirements, you might want to prevent the app from fully starting
+        # or allow it to start in a degraded state. Current logic allows it to start but logs critical error.
 
     yield # Application runs here
 
     logger.info("Application shutdown...")
-    app_state["florence_model"] = None
-    app_state["florence_processor"] = None
     app_state["gemini_model"] = None
     app_state["is_ready"] = False
-    app_state["gemini_available"] = False
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
     logger.info("Resources cleaned up.")
 
 # --- FastAPI Application Instance ---
 
 app = FastAPI(
-    title="AI Fashion Assistant",
-    description="API using Florence-2 for image captioning and Gemini for outfit recommendations.",
-    version="1.1.0", # Updated version
+    title="AI Fashion Assistant (Gemini Powered)",
+    description="API using Gemini for image analysis and outfit recommendations.",
+    version="2.0.0", # Updated version to reflect major change
     lifespan=lifespan
 )
 
 # --- Static Files & Templates ---
-# Ensure the paths are correct relative to where main.py is located
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 templates = Jinja2Templates(directory=templates_dir)
-
 
 # --- Helper Functions ---
 
@@ -182,7 +126,7 @@ def download_image(url: str) -> Image.Image:
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
         response = requests.get(url, stream=True, timeout=15, headers=headers)
-        response.raise_for_status()
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
         image = Image.open(io.BytesIO(response.content)).convert("RGB")
         logger.info(f"Successfully downloaded image from URL: {url}")
         return image
@@ -206,86 +150,80 @@ def process_uploaded_image(file: UploadFile) -> Image.Image:
         logger.error(f"Error processing uploaded file {file.filename}: {e}", exc_info=True)
         raise HTTPException(status_code=400, detail=f"Could not read or process uploaded image file: {e}")
 
-def run_florence_inference(model, processor, image: Image.Image, task_prompt: str = "<CAPTION>") -> str:
-    """Runs the Florence-2 model inference."""
-    if not app_state["is_ready"] or model is None or processor is None:
-        logger.error("Florence-2 inference requested but model is not ready.")
-        raise HTTPException(status_code=503, detail="Captioning model is not available.")
 
-    logger.info(f"Running Florence-2 inference with task prompt: {task_prompt}")
-
-    try:
-        # Ensure image is not too large (optional, but good practice)
-        # max_size = (1024, 1024)
-        # image.thumbnail(max_size, Image.Resampling.LANCZOS)
-
-        inputs = processor(text=task_prompt, images=image, return_tensors="pt").to(DEVICE, DTYPE)
-
-        with torch.no_grad(): # Disable gradient calculation for inference
-            generated_ids = model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"].to(DEVICE, DTYPE), # Ensure pixel values are on correct device/dtype
-                max_new_tokens=1024, # As per original
-                num_beams=3,
-                do_sample=False # Usually better for captioning
-            )
-
-        # Decode generated IDs
-        generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
-        logger.info(f"Raw Florence-2 generated text: {generated_text}")
-
-        # Post-process using the processor
-        parsed_answer = processor.post_process_generation(
-            generated_text,
-            task=task_prompt,
-            image_size=(image.width, image.height)
-        )
-        logger.info(f"Parsed Florence-2 answer: {parsed_answer}")
-
-        # Extract the specific result based on the task prompt
-        caption = parsed_answer.get(task_prompt)
-
-        if caption is None:
-            # Fallback if the expected key isn't found
-            caption = parsed_answer.get('caption', "Could not parse caption from model output.")
-            logger.warning(f"Could not find key '{task_prompt}' in parsed answer. Using fallback. Full answer: {parsed_answer}")
-
-
-        # Ensure result is a string
-        if isinstance(caption, list):
-            caption = caption[0] if caption else "Caption list was empty."
-        elif not isinstance(caption, str):
-             caption = str(caption) # Convert if it's some other type
-
-        # Simple cleanup
-        caption = caption.strip()
-
-        logger.info(f"Florence-2 Inference successful. Final caption: {caption}")
-        return caption
-
-    except Exception as e:
-        logger.error(f"Error during Florence-2 inference: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Florence-2 model inference failed: {e}")
-
-def get_gemini_recommendations(caption: str) -> str:
-    """Gets outfit recommendations from Gemini based on the caption."""
-    if not app_state["gemini_available"] or not app_state["gemini_model"]:
-        logger.warning("Gemini recommendations requested but Gemini is not available.")
-        return "AI stylist recommendations are currently unavailable."
+def get_gemini_image_description(image: Image.Image) -> str:
+    """
+    Generates a description for the provided image using the Gemini Vision model.
+    """
+    if not app_state["is_ready"] or not app_state["gemini_model"]:
+        logger.error("Gemini description requested but model is not ready.")
+        raise HTTPException(status_code=503, detail="Image analysis model is not available.")
 
     gemini_model = app_state["gemini_model"]
-    logger.info("Requesting recommendations from Gemini...")
+    logger.info("Requesting image description from Gemini...")
+
+    # --- Prepare Prompt for Vision Model ---
+    # Combine text prompt and image data
+    prompt_parts = [
+        "Describe the clothing items and overall style shown in this image in detail. Focus on colors, types of garments, patterns, and accessories.",
+        image # Pass the PIL image object directly
+    ]
+
+    try:
+        # Call Gemini API
+        response = gemini_model.generate_content(prompt_parts)
+
+        # --- Handle Response ---
+        # Check for blocked content or empty response
+        if not response.parts:
+             if response.prompt_feedback.block_reason:
+                 block_reason = response.prompt_feedback.block_reason
+                 logger.warning(f"Gemini image description request blocked. Reason: {block_reason}")
+                 # Propagate a user-friendly error
+                 raise HTTPException(status_code=400, detail=f"Image analysis failed due to content policy: {block_reason}")
+             else:
+                 logger.warning("Gemini returned an empty response for image description.")
+                 raise HTTPException(status_code=500, detail="Image analysis failed: No description generated.")
+
+        description = response.text.strip()
+        logger.info("Successfully generated image description from Gemini.")
+        # logger.debug(f"Gemini Raw Description Response:\n{description}") # Uncomment for debugging
+        return description
+
+    except google.api_core.exceptions.PermissionDenied:
+        logger.error("Gemini API key is invalid or lacks permissions.", exc_info=True)
+        raise HTTPException(status_code=500, detail="Image analysis service permission error.")
+    except google.api_core.exceptions.ResourceExhausted:
+        logger.error("Gemini API quota exceeded.", exc_info=True)
+        raise HTTPException(status_code=429, detail="Image analysis service quota limit reached. Please try again later.")
+    except HTTPException as http_exc: # Re-raise specific HTTP exceptions
+        raise http_exc
+    except Exception as e:
+        logger.error(f"Error calling Gemini API for image description: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating image description: {e}")
+
+
+def get_gemini_recommendations(description: str) -> str:
+    """Gets outfit recommendations from Gemini based on the image description."""
+    if not app_state["is_ready"] or not app_state["gemini_model"]:
+        logger.warning("Gemini recommendations requested but Gemini is not available.")
+        # Return a clearer message if the model isn't ready vs just unavailable
+        return "AI stylist recommendations are currently unavailable (model not ready)."
+
+    gemini_model = app_state["gemini_model"]
+    logger.info("Requesting recommendations from Gemini based on its own description...")
 
     # --- Improved Prompt ---
+    # Slightly adjusted to clarify the description source
     prompt = f"""
     You are a WORLD CLASS AI fashion stylist.
-    A user has uploaded an image, and it has been described as: "{caption}"
+    An image was analyzed, and the key clothing items and style were described as: "{description}"
 
     Based *only* on this description, please provide stylish and practical outfit recommendations. Suggest complementary items like tops, bottoms, shoes, outerwear, and accessories to create a complete, cohesive look.
 
     Focus on:
     - Color coordination and harmony.
-    - Style matching (e.g., casual, formal, bohemian).
+    - Style matching (e.g., casual, formal, bohemian, matching the described style).
     - Suggesting specific types of items (e.g., "white sneakers", "a tailored blazer", "delicate gold necklace").
     - Briefly explaining *why* the suggested items work well together.
 
@@ -293,30 +231,36 @@ def get_gemini_recommendations(caption: str) -> str:
     """
 
     try:
+        # Use the same model instance for text generation
         response = gemini_model.generate_content(
             prompt,
-            # Optional: Add safety settings if needed
-            # safety_settings=[...]
-            # Optional: Generation config
+            # Optional: Add generation config if needed
             # generation_config=genai.types.GenerationConfig(...)
-            )
+        )
 
         # Check for blocked content or empty response
         if not response.parts:
              if response.prompt_feedback.block_reason:
-                 logger.warning(f"Gemini request blocked. Reason: {response.prompt_feedback.block_reason}")
+                 logger.warning(f"Gemini recommendations request blocked. Reason: {response.prompt_feedback.block_reason}")
                  return f"Could not generate recommendations due to content policy: {response.prompt_feedback.block_reason}"
              else:
-                 logger.warning("Gemini returned an empty response.")
-                 return "AI stylist couldn't generate recommendations for this item."
+                 logger.warning("Gemini returned an empty response for recommendations.")
+                 return "AI stylist couldn't generate recommendations based on the description."
 
         recommendations = response.text.strip()
         logger.info("Successfully received recommendations from Gemini.")
-        # logger.debug(f"Gemini Raw Response Text:\n{recommendations}") # Uncomment for debugging
+        # logger.debug(f"Gemini Raw Recommendation Response:\n{recommendations}") # Uncomment for debugging
         return recommendations
 
+    except google.api_core.exceptions.PermissionDenied:
+         logger.error("Gemini API key is invalid or lacks permissions for recommendations.", exc_info=True)
+         return "Error getting recommendations: Service permission error."
+    except google.api_core.exceptions.ResourceExhausted:
+        logger.error("Gemini API quota exceeded during recommendations.", exc_info=True)
+        return "Recommendation service quota limit reached. Please try again later."
     except Exception as e:
-        logger.error(f"Error calling Gemini API: {e}", exc_info=True)
+        logger.error(f"Error calling Gemini API for recommendations: {e}", exc_info=True)
+        # Return an error message, but don't crash the request
         return f"Error getting recommendations from AI stylist: {e}"
 
 
@@ -335,11 +279,15 @@ async def predict_image(
     file: UploadFile = File(None, alias="image_file"), # Use alias matching JS FormData key
 ):
     """
-    Receives image (URL or upload), generates caption (Florence-2),
-    and gets outfit recommendations (Gemini).
-    Returns both caption and recommendations.
+    Receives image (URL or upload), generates description (Gemini Vision),
+    and gets outfit recommendations (Gemini Text).
+    Returns both description (as 'caption') and recommendations.
     """
     logger.info("Received request on /predict endpoint.")
+
+    if not app_state["is_ready"]:
+        logger.error("Prediction requested but the service is not ready.")
+        raise HTTPException(status_code=503, detail="Service Unavailable: AI model not configured.")
 
     if not image_url and not file:
         logger.warning("Prediction request received without URL or file.")
@@ -347,7 +295,7 @@ async def predict_image(
 
     if image_url and file:
         logger.warning("Prediction request received with both URL and file. Using file.")
-        # Prioritize file if both are sent, matching original logic
+        # Prioritize file if both are sent
 
     image: Image.Image | None = None
     input_source = "file" if file else "url"
@@ -363,7 +311,6 @@ async def predict_image(
             image = download_image(image_url)
 
     except HTTPException as http_exc:
-        # Log the specific HTTP exception detail before re-raising
         logger.error(f"HTTPException during image processing from {input_source}: {http_exc.detail}")
         raise http_exc
     except Exception as e:
@@ -371,69 +318,54 @@ async def predict_image(
         raise HTTPException(status_code=500, detail=f"Failed to process input image: {e}")
 
     if image is None:
-         # This case should ideally be caught by the specific exceptions above
-         logger.error("Image object is None after processing inputs, source: {input_source}. This should not happen.")
+         logger.error(f"Image object is None after processing inputs, source: {input_source}. This should not happen.")
          raise HTTPException(status_code=500, detail="Internal error: Failed to obtain image object.")
 
-    # --- Step 1: Get Caption from Florence-2 ---
-    # Using <CAPTION> as it's more standard for general description than <DETAILED_CAPTION>
-    # which might be geared towards object detection bounding boxes in some fine-tunings.
-    # Stick with the processor's default if unsure, or try <MORE_DETAILED_CAPTION> if needed.
-    caption_task_prompt = "<DETAILED_CAPTION>"
-    caption = ""
+    # --- Step 1: Get Description from Gemini Vision ---
+    description = ""
     try:
-        caption = run_florence_inference(
-            app_state["florence_model"],
-            app_state["florence_processor"],
-            image,
-            task_prompt=caption_task_prompt
-        )
-        logger.info(f"Generated caption: {caption}")
+        description = get_gemini_image_description(image)
+        logger.info(f"Generated description (caption): {description}")
     except HTTPException as http_exc:
-        # If captioning fails, maybe we still proceed? Or return error?
-        # For now, let's return the error immediately.
-        logger.error(f"Captioning failed: {http_exc.detail}")
-        raise http_exc # Re-raise the specific HTTP error from inference
+        # If description generation fails, return the error immediately.
+        logger.error(f"Image description generation failed: {http_exc.detail}")
+        raise http_exc # Re-raise the specific HTTP error from the function
     except Exception as e:
-        logger.error(f"Unexpected error during captioning: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Unexpected error during image captioning: {e}")
+        logger.error(f"Unexpected error during image description: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unexpected error during image analysis: {e}")
 
-
-    # --- Step 2: Get Recommendations from Gemini ---
+    # --- Step 2: Get Recommendations from Gemini (based on description) ---
     recommendations = "Recommendations unavailable." # Default
-    if caption and app_state["gemini_available"]:
+    if description: # Proceed only if we have a description
         try:
-            recommendations = get_gemini_recommendations(caption)
+            recommendations = get_gemini_recommendations(description)
             logger.info("Received recommendations.")
         except Exception as e:
-            # Log the error but don't fail the whole request, just return default message
+            # Log the error but don't fail the whole request, return default message
             logger.error(f"Error getting Gemini recommendations: {e}", exc_info=True)
             recommendations = "Error retrieving recommendations from AI stylist."
-    elif not app_state["gemini_available"]:
-         recommendations = "AI Stylist (Gemini) is not configured or available."
-    elif not caption:
-         recommendations = "Cannot generate recommendations without a valid caption."
+    elif not description:
+         recommendations = "Cannot generate recommendations without a valid image description."
 
 
     # --- Step 3: Return Results ---
+    # Keep the key "caption" for frontend compatibility, even though it's a Gemini description now.
     return JSONResponse(content={
-        "caption": caption,
+        "caption": description,
         "recommendations": recommendations
     })
 
 # --- Health Check Endpoint ---
 @app.get("/health")
 async def health_check():
-    """Basic health check endpoint."""
-    florence_ready = app_state.get("is_ready", False)
-    gemini_ready = app_state.get("gemini_available", False)
-    status = "ok" if florence_ready else "service_unavailable" # Base status on core model
+    """Basic health check endpoint for Gemini readiness."""
+    gemini_ready = app_state.get("is_ready", False)
+    status = "ok" if gemini_ready else "service_unavailable"
 
     return JSONResponse(content={
         "status": status,
         "models": {
-             "florence2": {"ready": florence_ready},
-             "gemini": {"ready": gemini_ready, "configured": bool(GEMINI_API_KEY) }
+             "gemini": {"ready": gemini_ready, "configured": bool(GEMINI_API_KEY and app_state.get('gemini_model')) }
         }
     })
 
@@ -442,9 +374,9 @@ if __name__ == "__main__":
     import uvicorn
     logger.info("Starting Uvicorn server directly for development...")
     uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0", # Bind to 0.0.0.0 to be accessible on network
+        "app.main:app", # Point to the app instance within the main module
+        host=os.getenv("HOST", "0.0.0.0"), # Bind to 0.0.0.0 to be accessible on network
         port=int(os.getenv("PORT", 8000)), # Allow port override via env var
-        reload=True, # Enable auto-reload for development
-        workers=1    # Use 1 worker for simplicity with reload
+        reload=bool(os.getenv("RELOAD", True)), # Enable auto-reload for development via env var
+        workers=int(os.getenv("WORKERS", 1)) # Use 1 worker for simplicity with reload via env var
     )
