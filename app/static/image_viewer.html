@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outfit Recommendation Viewer</title>
+    <!-- Link to favicon relative to the domain root -->
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4; /* Light gray background */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"; /* System font stack */
+            display: flex;
+            flex-direction: column;
+            align-items: center; /* Center content horizontally */
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        #viewer-image {
+            display: block;
+            max-width: 90%; /* Limit image width */
+            max-height: 70vh; /* Limit image height */
+            margin-bottom: 30px; /* Space below image */
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.15);
+            background-color: #ffffff; /* White bg if image transparent */
+            border-radius: 8px;
+            object-fit: contain; /* Ensure full image is shown */
+        }
+
+        #viewer-text-container {
+            background-color: #ffffff;
+            padding: 25px 30px;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1); /* Highlighted shadow */
+            max-width: 800px; /* Limit text width */
+            width: 90%;
+            box-sizing: border-box;
+            margin-bottom: 20px; /* Space at the bottom */
+        }
+
+        #viewer-text {
+            color: #333;
+            line-height: 1.7;
+            font-size: 1rem; /* 16px */
+        }
+
+        /* Basic text formatting styles */
+        #viewer-text strong {
+            color: #111; /* Darker for strong */
+            font-weight: 600;
+         }
+        #viewer-text em {
+            font-style: italic;
+            color: #444; /* Slightly different emphasis color */
+        }
+        #viewer-text ul {
+            list-style: disc;
+            padding-left: 25px;
+            margin-top: 10px;
+            margin-bottom: 10px; /* Space after list */
+        }
+        #viewer-text li {
+            margin-bottom: 6px; /* Space between list items */
+        }
+         #viewer-text br {
+             margin-bottom: 0.5em; /* Add space after line breaks */
+         }
+
+
+        .error-message {
+             color: #c00;
+             font-weight: bold;
+             text-align: center;
+        }
+
+    </style>
+</head>
+<body>
+
+    <img id="viewer-image" src="#" alt="Loading recommendation image...">
+
+    <div id="viewer-text-container">
+        <div id="viewer-text">Loading recommendation text...</div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const imgElement = document.getElementById('viewer-image');
+            const textElement = document.getElementById('viewer-text');
+            const textContainer = document.getElementById('viewer-text-container');
+
+            if (!imgElement || !textElement || !textContainer) {
+                console.error("Essential viewer elements not found!");
+                document.body.innerHTML = "<h1>Error loading viewer page elements.</h1>";
+                return;
+            }
+
+            try {
+                // Get URL parameters
+                const urlParams = new URLSearchParams(window.location.search);
+                const imageUrlParam = urlParams.get('imgUrl');
+                const textParam = urlParams.get('text');
+
+                let hasError = false;
+
+                // Set Image Source
+                if (imageUrlParam) {
+                    try {
+                        const decodedImageUrl = decodeURIComponent(imageUrlParam);
+                        imgElement.src = decodedImageUrl;
+                        imgElement.alt = "Outfit Recommendation Image"; // Update alt text
+                         // Add error handling for the image itself
+                         imgElement.onerror = () => {
+                              console.error("Failed to load image resource:", decodedImageUrl);
+                              imgElement.alt = "Error: Could not load image resource.";
+                              imgElement.style.display = 'none'; // Hide broken image
+                              const imgErrorText = document.createElement('p');
+                              imgErrorText.textContent = "Error: The image could not be loaded.";
+                              imgErrorText.classList.add('error-message');
+                              imgElement.parentNode.insertBefore(imgErrorText, imgElement);
+                         }
+                    } catch (e) {
+                        console.error("Error decoding image URL parameter:", e);
+                        imgElement.alt = "Error loading image: Invalid URL data.";
+                        hasError = true;
+                    }
+                } else {
+                    console.error("Image URL parameter ('imgUrl') missing.");
+                    imgElement.alt = "Error loading image: URL parameter missing.";
+                    imgElement.style.display = 'none'; // Hide broken img tag
+                    hasError = true;
+                }
+
+                // Set Text Content
+                if (textParam) {
+                     try {
+                        const decodedText = decodeURIComponent(textParam);
+                         // Apply basic formatting (same as main page)
+                        let formattedText = decodedText
+                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                            .replace(/^\s*[-*]\s+/gm, '<li>')
+                            .replace(/^\s*\d+\.\s+/gm, '<li>')
+                            .replace(/<\/li>\s*<li>/g, '</li><li>')
+                            .replace(/((?:<li>.*?<\/li>\s*)+)/g, '<ul>$1</ul>')
+                            .replace(/\n/g, '<br>');
+                        textElement.innerHTML = formattedText; // Use innerHTML for formatting
+                    } catch (e) {
+                         console.error("Error decoding text parameter:", e);
+                         textElement.textContent = "Error loading text: Invalid data.";
+                         hasError = true;
+                    }
+                } else {
+                    console.error("Text parameter ('text') missing.");
+                    textElement.textContent = "Error loading text: Data parameter missing.";
+                    hasError = true;
+                }
+
+                if (hasError) {
+                    textContainer.style.borderColor = '#c00'; // Indicate error visually if needed
+                    textContainer.style.borderWidth = '2px';
+                    textContainer.style.borderStyle = 'solid';
+                }
+
+            } catch (error) {
+                 console.error("Error processing URL parameters:", error);
+                 textElement.textContent = "An error occurred while loading the recommendation details.";
+                 textElement.classList.add('error-message');
+                 imgElement.style.display = 'none';
+            }
+        });
+    </script>
+
+</body>
+</html>

@@ -1,115 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Florence Fashion | AI Fashion Analysis</title>
-        <!-- Framer Motion for animations -->
-        <script src="https://unpkg.com/framer-motion/dist/framer-motion.js"></script>
-        <!-- Modern fonts -->
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-        <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Florence Fashion | AI Fashion Analysis</title>
+    <!-- Favicon -->
+    <link rel="icon" href="{{ url_for('static', path='/favicon.ico') }}" type="image/x-icon">
+    <!-- Framer Motion (Optional - Keep if used elsewhere) -->
+    <!-- <script src="https://unpkg.com/framer-motion/dist/framer-motion.js"></script> -->
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', path='/style.css') }}">
 </head>
-    <body>
-        <div class="particles" id="particles"></div>
-        
-        <header>
-            <div class="header-bg"></div>
-            <div class="container">
-                <div class="header-content">
-                    <div class="logo">Florence Fashion</div>
-                </div>
-            </div>
-        </header>
-    
-        <section class="hero">
-            <div class="container">
-                <h1>AI Fashion Analysis</h1>
-                <p>Upload your fashion image and get instant AI-powered insights and style recommendations.</p>
-            </div>
-        </section>
-    
+<body>
+    <div class="particles" id="particles"></div>
+
+    <header>
+        <div class="header-bg"></div>
         <div class="container">
-            <!-- Upload Section -->
-            <div class="upload-container">
-                <div class="upload-tabs">
-                    <div class="tab active" data-tab="file">Upload Image</div>
-                    <div class="tab" data-tab="url">Image URL</div>
-                </div>
-                
-                <div class="tab-content active" id="file-tab">
-                    <div class="file-upload" id="dropzone">
-                        <div class="file-upload-icon">📷</div>
-                        <h3>Drag & Drop your image here</h3>
-                        <p>or click to browse your files</p>
-                        <input type="file" id="image-file-input" accept="image/*">
-                    </div>
-                </div>
-                
-                <div class="tab-content" id="url-tab">
-                    <input type="text" class="url-input" id="image-url-input" placeholder="Paste image URL here...">
-                </div>
-                
-                <div id="image-preview-container" style="display: none; margin-bottom: 20px; text-align: center;">
-                    <img id="image-preview" class="preview-image" src="/placeholder.svg" alt="Preview">
-                </div>
-                
-                <div class="error-message" id="error-message"></div>
-                
-                <div style="text-align: center;">
-                    <button class="submit-btn" id="submit-button">Analyze Fashion</button>
+            <div class="header-content">
+                <div class="logo">Florence Fashion</div>
+            </div>
+        </div>
+    </header>
+
+    <section class="hero">
+        <div class="container">
+            <h1>AI Fashion Analysis</h1>
+            <p>Upload your fashion image and get instant AI-powered insights and style recommendations.</p>
+        </div>
+    </section>
+
+    <div class="container">
+        <!-- Upload Section -->
+        <div class="upload-container">
+            <div class="upload-tabs">
+                <div class="tab active" data-tab="file">Upload Image</div>
+                <div class="tab" data-tab="url">Image URL</div>
+            </div>
+
+            <div class="tab-content active" id="file-tab">
+                <div class="file-upload" id="dropzone">
+                    <div class="file-upload-icon">📷</div>
+                    <h3>Drag & Drop your image here</h3>
+                    <p>or click to browse your files</p>
+                    <input type="file" id="image-file-input" accept="image/*">
                 </div>
             </div>
-            
-            <!-- Loading Container -->
-            <div class="loading-container" id="loading-container">
-                <div class="loading-animation">
-                    <div class="loading-circle"></div>
-                    <div class="loading-circle"></div>
-                    <div class="loading-circle"></div>
-                </div>
-                <div class="loading-text">Analyzing your fashion style...</div>
+
+            <div class="tab-content" id="url-tab">
+                <input type="text" class="url-input" id="image-url-input" placeholder="Paste image URL here...">
             </div>
-            
-            <!-- Results Split View -->
-            <div class="results-container" id="results-container">
-                <div class="results-header">
-                    <h2>Fashion Analysis Results</h2>
-                </div>
-                
-                <div class="results-split-view">
-                    <!-- Fashion Analysis Panel -->
-                    <div class="analysis-panel">
-                        <div class="panel-header">
-                            <div class="panel-icon">✨</div>
-                            <div class="panel-title">Fashion Analysis</div>
-                        </div>
-                        <div class="panel-content" id="analysis-content">
-                            <!-- Fashion analysis results will appear here -->
-                        </div>
+
+            <div id="image-preview-container" style="display: none; margin-bottom: 20px; text-align: center;">
+                <img id="image-preview" class="preview-image" src="#" alt="Preview"> <!-- Use # for empty src -->
+            </div>
+
+            <div class="error-message" id="error-message"></div>
+
+            <div style="text-align: center;">
+                <button class="submit-btn" id="submit-button">Analyze Fashion</button>
+            </div>
+        </div>
+
+        <!-- Loading Container -->
+        <div class="loading-container" id="loading-container">
+            <div class="loading-animation">
+                <div class="loading-circle"></div>
+                <div class="loading-circle"></div>
+                <div class="loading-circle"></div>
+            </div>
+            <div class="loading-text">Analyzing your fashion style...</div>
+        </div>
+
+        <!-- Results Split View -->
+        <div class="results-container" id="results-container">
+            <div class="results-header">
+                <h2>Fashion Analysis Results</h2>
+            </div>
+
+            <div class="results-split-view">
+                <!-- Fashion Analysis Panel -->
+                <div class="analysis-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon">✨</div>
+                        <div class="panel-title">Your Item Analysis</div> <!-- Changed title -->
                     </div>
-                    
-                    <!-- AI Stylist Panel -->
-                    <div class="stylist-panel">
-                        <div class="panel-header">
-                            <div class="panel-icon">👗</div>
-                            <div class="panel-title">AI Stylist</div>
-                        </div>
-                        <div class="stylist-cards" id="stylist-cards">
-                            <!-- AI recommendation cards will appear here -->
-                        </div>
-                        <div class="stylist-footer">
-                            <img src="https://lh3.googleusercontent.com/RyoQG0YU8J7iyFaRWK7o7-L1QbAGDpVXBpJfEBtvx7WjgYVUPRTgX0yvUy_CuLfhUhgOmqA=e14-rj-sc0xffffff-h130-w32" alt="Gemini">
-                            Powered by Gemini AI
-                        </div>
+                    <div class="panel-content" id="analysis-content">
+                        <!-- Fashion analysis results will appear here -->
+                        Your uploaded image analysis will appear here once generated.
+                    </div>
+                </div>
+
+                <!-- AI Stylist Panel -->
+                <div class="stylist-panel">
+                    <div class="panel-header">
+                        <div class="panel-icon">👗</div>
+                        <div class="panel-title">AI Outfit Ideas</div> <!-- Changed title -->
+                    </div>
+                    <!-- Cards will be generated here by JS -->
+                    <div class="stylist-cards" id="stylist-cards">
+                        <!-- Initial placeholder or welcome message (optional) -->
+                        <!-- <div class="flash-card visible">
+                            <div class="flash-card-title">Welcome!</div>
+                            <div class="flash-card-content">Your AI outfit ideas will appear here. Upload an image to get started.</div>
+                            <div class="flash-card-tag">Info</div>
+                        </div> -->
+                    </div>
+                    <div class="stylist-footer">
+                        <img src="https://lh3.googleusercontent.com/RyoQG0YU8J7iyFaRWK7o7-L1QbAGDpVXBpJfEBtvx7WjgYVUPRTgX0yvUy_CuLfhUhgOmqA=e14-rj-sc0xffffff-h130-w32" alt="Gemini">
+                        Powered by Gemini AI & Pollinations
                     </div>
                 </div>
             </div>
         </div>
-    
-        <script src="{{ url_for('static', path='/script.js') }}" defer></script>
-    </body>
-    </html>
-    
+    </div>
+
+    <script src="{{ url_for('static', path='/script.js') }}" defer></script>
+</body>
+</html>
