@@ -571,7 +571,7 @@ def get_gemini_recommendations(description: str) -> str:
     You are a WORLD CLASS AI fashion stylist.
     An image was analyzed, and the key clothing items and style were described as: "{description}"
 
-    Based *only* on this description, please provide **exactly 3 distinct outfit recommendations**.
+    Based *only* on this description, please provide **exactly 3 RELATABLE outfit recommendations**.
     Each recommendation should suggest complementary items (tops, bottoms, shoes, outerwear, accessories) and a suitable hairstyle to create a complete, cohesive look.
 
     For each recommendation:
@@ -640,7 +640,7 @@ def parse_recommendations(recommendations_text: str) -> list[dict[str, str]]:
                  # Create a simplified prompt for the image generator
                  # Focus on key items, colors, and overall style described in the option
                  # This requires some heuristics or could even be another LLM call (but keeping it simple here)
-                 image_prompt_text = f"Fashion sketch style, rough lines: A person wearing {clean_text[:250]}" # Limit prompt length
+                 image_prompt_text = clean_text[:350] # Limit prompt length
                  encoded_prompt = urllib.parse.quote(image_prompt_text)
                  image_url = f"{POLLINATIONS_BASE_URL}{encoded_prompt}"
 
