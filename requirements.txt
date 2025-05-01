@@ -12,3 +12,4 @@ bitsandbytes            # May be needed by accelerate or for quantization (optio
 einops 
 timm
 google.generativeai
+python-json-logger 
