@@ -1,15 +1,9 @@
 fastapi
 uvicorn[standard]         # ASGI server + extras like websockets, http-tools
-python-multipart        # For handling form data (file uploads)
-transformers[torch]       # Hugging Face transformers library (using PyTorch backend)
-torch                   # PyTorch (required by the model)
+python-multipart        # For handling form data (file uploads)          # PyTorch (required by the model)
 Pillow                  # Python Imaging Library for image manipulation
 requests                # For fetching images from URLs
 jinja2                  # For rendering HTML templates
-python-dotenv           # For optional environment variables
-accelerate              # Often recommended for faster inference with HF models
-bitsandbytes            # May be needed by accelerate or for quantization (optional but good practice)
-einops 
-timm
+python-dotenv           # For optional environment variables             # Often recommended for faster inference with HF model
 google.generativeai
 python-json-logger 
